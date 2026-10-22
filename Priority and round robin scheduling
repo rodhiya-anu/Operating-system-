@@ -1,0 +1,238 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
+#define MAX 100
+
+// Priority Convention: LOWER numerical value = HIGHER priority (e.g., 1 is higher priority than 2).
+const char* PRIORITY_CONVENTION = "Lower numerical value indicates higher priority (e.g., 1 > 2).";
+
+typedef struct {
+    int pid;
+    int at;  // Arrival Time
+    int bt;  // Burst Time
+    int pr;  // Priority
+    int ct;  // Completion Time
+    int tat; // Turnaround Time
+    int wt;  // Waiting Time
+} Process;
+
+// --- 1. Non-Preemptive Priority Scheduling ---
+void priorityScheduling(Process proc[], int n) {
+    int completed = 0, cur_time = 0;
+    bool is_completed[MAX] = {false};
+
+    printf("\n=======================================================\n");
+    printf("         NON-PREEMPTIVE PRIORITY SCHEDULING\n");
+    printf("=======================================================\n");
+    printf("Gantt / Execution Sequence:\n");
+
+    while (completed < n) {
+        int idx = -1;
+        int highest_pr = 1e9;
+
+        // Find arrived process with highest priority (lowest numerical value)
+        for (int i = 0; i < n; i++) {
+            if (proc[i].at <= cur_time && !is_completed[i]) {
+                if (proc[i].pr < highest_pr) {
+                    highest_pr = proc[i].pr;
+                    idx = i;
+                } else if (proc[i].pr == highest_pr) {
+                    if (proc[i].at < proc[idx].at) {
+                        idx = i;
+                    }
+                }
+            }
+        }
+
+        if (idx != -1) {
+            int start_time = cur_time;
+            cur_time += proc[idx].bt;
+            proc[idx].ct = cur_time;
+            proc[idx].tat = proc[idx].ct - proc[idx].at;
+            proc[idx].wt = proc[idx].tat - proc[idx].bt;
+            is_completed[idx] = true;
+            completed++;
+
+            printf("[Time %d - %d] -> Process P%d (Priority: %d)\n", start_time, cur_time, proc[idx].pid, proc[idx].pr);
+        } else {
+            // CPU is Idle
+            int next_at = 1e9;
+            for (int i = 0; i < n; i++) {
+                if (!is_completed[i] && proc[i].at > cur_time && proc[i].at < next_at) {
+                    next_at = proc[i].at;
+                }
+            }
+            printf("[Time %d - %d] -> CPU IDLE\n", cur_time, next_at);
+            cur_time = next_at;
+        }
+    }
+
+    printf("\nProcess Metrics:\n");
+    printf("PID\tAT\tBT\tPriority\tCT\tTAT\tWT\n");
+    float total_tat = 0, total_wt = 0;
+    for (int i = 0; i < n; i++) {
+        total_tat += proc[i].tat;
+        total_wt += proc[i].wt;
+        printf("P%d\t%d\t%d\t%d\t\t%d\t%d\t%d\n", proc[i].pid, proc[i].at, proc[i].bt, proc[i].pr, proc[i].ct, proc[i].tat, proc[i].wt);
+    }
+    printf("Average Turnaround Time: %.2f\n", total_tat / n);
+    printf("Average Waiting Time: %.2f\n", total_wt / n);
+}
+
+// --- 2. Round Robin Scheduling ---
+void roundRobinScheduling(Process proc[], int n, int tq) {
+    int rem_bt[MAX];
+    int ct[MAX], tat[MAX], wt[MAX];
+    for (int i = 0; i < n; i++) rem_bt[i] = proc[i].bt;
+
+    // Standard FIFO Ready Queue
+    int queue[MAX * 10];
+    int front = 0, rear = 0;
+    bool in_queue[MAX] = {false};
+
+    printf("\n=======================================================\n");
+    printf("               ROUND ROBIN SCHEDULING\n");
+    printf("=======================================================\n");
+    printf("Gantt / Execution Slices:\n");
+
+    int cur_time = 0, completed = 0;
+
+    // Find earliest arrival time to start
+    int min_at = 1e9;
+    for (int i = 0; i < n; i++) if (proc[i].at < min_at) min_at = proc[i].at;
+    if (min_at > 0) {
+        printf("[Time %d - %d] -> CPU IDLE\n", 0, min_at);
+        cur_time = min_at;
+    }
+
+    // Push initial processes that arrived at cur_time
+    for (int i = 0; i < n; i++) {
+        if (proc[i].at <= cur_time) {
+            queue[rear++] = i;
+            in_queue[i] = true;
+        }
+    }
+
+    while (completed < n) {
+        if (front == rear) {
+            // Queue is empty, CPU Idle
+            int next_at = 1e9;
+            for (int i = 0; i < n; i++) {
+                if (rem_bt[i] > 0 && proc[i].at > cur_time && proc[i].at < next_at) {
+                    next_at = proc[i].at;
+                }
+            }
+            printf("[Time %d - %d] -> CPU IDLE\n", cur_time, next_at);
+            cur_time = next_at;
+
+            for (int i = 0; i < n; i++) {
+                if (rem_bt[i] > 0 && proc[i].at <= cur_time && !in_queue[i]) {
+                    queue[rear++] = i;
+                    in_queue[i] = true;
+                }
+            }
+            continue;
+        }
+
+        int idx = queue[front++];
+        int slice = (rem_bt[idx] > tq) ? tq : rem_bt[idx];
+        int start_time = cur_time;
+        cur_time += slice;
+        rem_bt[idx] -= slice;
+
+        printf("[Time %d - %d] -> Process P%d (Slice executed: %d, Remaining: %d)\n",
+               start_time, cur_time, proc[idx].pid, slice, rem_bt[idx]);
+
+        // Push newly arrived processes during this time slice
+        for (int i = 0; i < n; i++) {
+            if (i != idx && rem_bt[i] > 0 && proc[i].at <= cur_time && !in_queue[i]) {
+                queue[rear++] = i;
+                in_queue[i] = true;
+            }
+        }
+
+        // If the current process still needs CPU, re-enqueue it
+        if (rem_bt[idx] > 0) {
+            queue[rear++] = idx;
+        } else {
+            completed++;
+            ct[idx] = cur_time;
+            tat[idx] = ct[idx] - proc[idx].at;
+            wt[idx] = tat[idx] - proc[idx].bt;
+            in_queue[idx] = false;
+        }
+    }
+
+    printf("\nProcess Metrics:\n");
+    printf("PID\tAT\tBT\tCT\tTAT\tWT\n");
+    float total_tat = 0, total_wt = 0;
+    for (int i = 0; i < n; i++) {
+        total_tat += tat[i];
+        total_wt += wt[i];
+        printf("P%d\t%d\t%d\t%d\t%d\t%d\n", proc[i].pid, proc[i].at, proc[i].bt, ct[i], tat[i], wt[i]);
+    }
+    printf("Average Turnaround Time: %.2f\n", total_tat / n);
+    printf("Average Waiting Time: %.2f\n", total_wt / n);
+}
+
+int main() {
+    int n, tq;
+    Process proc[MAX];
+
+    printf("==============================================\n");
+    printf("  CPU SCHEDULING SIMULATION\n");
+    printf("==============================================\n");
+
+    // Requirement 2 & 9: Display priority convention
+    printf("Priority Convention: %s\n\n", PRIORITY_CONVENTION);
+
+    // Requirement 1: Accept Inputs
+    printf("Enter number of processes: ");
+    if (scanf("%d", &n) != 1 || n <= 0) {
+        printf("Invalid number of processes.\n");
+        return 1;
+    }
+
+    for (int i = 0; i < n; i++) {
+        printf("\nProcess %d:\n", i + 1);
+        printf("  Process ID: ");
+        scanf("%d", &proc[i].pid);
+        printf("  Arrival Time: ");
+        scanf("%d", &proc[i].at);
+        printf("  Burst Time: ");
+        scanf("%d", &proc[i].bt);
+        printf("  Priority: ");
+        scanf("%d", &proc[i].pr);
+    }
+
+    // Requirement 4: Accept and validate Time Quantum
+    do {
+        printf("\nEnter Round Robin Time Quantum (> 0): ");
+        if (scanf("%d", &tq) != 1 || tq <= 0) {
+            printf("Invalid input! Time quantum must be an integer strictly greater than 0.\n");
+            while (getchar() != '\n'); // Clear input buffer
+        } else {
+            break;
+        }
+    } while (1);
+
+    // Requirement 9: Confirm selected convention and quantum
+    printf("\n----------------------------------------------\n");
+    printf("CONFIGURED PARAMETERS:\n");
+    printf("Priority Convention : %s\n", PRIORITY_CONVENTION);
+    printf("Time Quantum        : %d\n", tq);
+    printf("----------------------------------------------\n");
+
+    // Make a copy for Round Robin so Priority modification doesn't mutate base data
+    Process proc_copy[MAX];
+    for (int i = 0; i < n; i++) proc_copy[i] = proc[i];
+
+    // Requirement 3, 7, 8: Non-preemptive Priority execution sequence
+    priorityScheduling(proc, n);
+
+    // Requirement 5, 6, 7, 8: Round Robin execution slices & sequence
+    roundRobinScheduling(proc_copy, n, tq);
+
+    return 0;
+}
