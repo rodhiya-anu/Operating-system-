@@ -1,0 +1,182 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_PROC 50
+
+typedef struct {
+    char pid[16];
+    int at;             /* Arrival Time (>= 0) */
+    int bt;             /* Burst Time (> 0)    */
+    int st, ct;         /* Start & Completion  */
+    int tat, wt;        /* Turnaround & Wait   */
+    int completed;      /* SJF status flag     */
+    int input_idx;      /* Original order      */
+} Process;
+
+/* Helper: Display preserved baseline dataset */
+void display_original_data(const Process orig[], int n) {
+    printf("\n================ PRESERVED ORIGINAL PROCESS DATASET ================\n");
+    printf("%-10s | %-18s | %-16s\n", "Proc ID", "Arrival Time (AT)", "Burst Time (BT)");
+    printf("--------------------------------------------------------------------\n");
+    for (int i = 0; i < n; i++) {
+        printf("%-10s | %-18d | %-16d\n", orig[i].pid, orig[i].at, orig[i].bt);
+    }
+}
+
+/* Helper: Print summary table and averages for a completed schedule */
+void print_metrics_table(const Process p[], int n, const char *algo_name) {
+    double sum_tat = 0.0, sum_wt = 0.0;
+    printf("\n--- %s Summary Table ---\n", algo_name);
+    printf("%-8s %-6s %-6s %-8s %-8s %-8s %-8s\n",
+           "PID", "AT", "BT", "Start", "End", "TAT", "WT");
+    printf("----------------------------------------------------------\n");
+    for (int i = 0; i < n; i++) {
+        printf("%-8s %-6d %-6d %-8d %-8d %-8d %-8d\n",
+               p[i].pid, p[i].at, p[i].bt, p[i].st, p[i].ct, p[i].tat, p[i].wt);
+        sum_tat += p[i].tat;
+        sum_wt  += p[i].wt;
+    }
+    printf("----------------------------------------------------------\n");
+    printf("Average Turnaround Time : %.2f units\n", sum_tat / n);
+    printf("Average Waiting Time    : %.2f units\n", sum_wt / n);
+}
+
+/* Requirement 4, 6, 7, 8, 9: FCFS Scheduling using Arrival Order */
+void run_fcfs(const Process orig[], int n) {
+    Process p[MAX_PROC];
+    for (int i = 0; i < n; i++) p[i] = orig[i]; /* Clone original data */
+
+    /* Sort by Arrival Time; Tie-Break by original input order / PID */
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (p[j].at > p[j + 1].at ||
+               (p[j].at == p[j + 1].at && p[j].input_idx > p[j + 1].input_idx)) {
+                Process tmp = p[j]; p[j] = p[j + 1]; p[j + 1] = tmp;
+            }
+        }
+    }
+
+    printf("\n==================== 1. FCFS SCHEDULING ====================\n");
+    printf("Tie-Breaking Rule: Earlier Arrival Time -> Original Input Order\n");
+    printf("Start / End Execution & Idle Intervals:\n");
+
+    int cur_time = 0;
+    char seq_buf[512] = "";
+
+    for (int i = 0; i < n; i++) {
+        if (cur_time < p[i].at) {
+            printf("  [CPU IDLE]  Start: %2d | End: %2d  (No process available)\n", cur_time, p[i].at);
+            strcat(seq_buf, "IDLE -> ");
+            cur_time = p[i].at;
+        }
+        p[i].st  = cur_time;
+        p[i].ct  = p[i].st + p[i].bt;
+        p[i].tat = p[i].ct - p[i].at;
+        p[i].wt  = p[i].tat - p[i].bt;
+        cur_time = p[i].ct;
+
+        printf("  [PROCESS ]  %-4s      | Start: %2d | End: %2d  (AT: %2d, BT: %2d)\n",
+               p[i].pid, p[i].st, p[i].ct, p[i].at, p[i].bt);
+        strcat(seq_buf, p[i].pid);
+        if (i < n - 1) strcat(seq_buf, " -> ");
+    }
+    printf("\nFCFS Execution Sequence : %s\n", seq_buf);
+    print_metrics_table(p, n, "FCFS");
+}
+void run_sjf(const Process orig[], int n) {
+    Process p[MAX_PROC];
+    for (int i = 0; i < n; i++) {
+        p[i] = orig[i];
+        p[i].completed = 0;
+    }
+
+    printf("\n============ 2. NON-PREEMPTIVE SJF SCHEDULING ==============\n");
+    printf("Tie-Breaking Rule: Shortest BT -> Earlier AT -> Lowest PID\n");
+    printf("Start / End Execution & Idle Intervals:\n");
+
+    int completed = 0, cur_time = 0;
+    char seq_buf[512] = "";
+
+    while (completed < n) {
+        int idx = -1;
+        for (int i = 0; i < n; i++) {
+            if (!p[i].completed && p[i].at <= cur_time) {
+                if (idx == -1 || p[i].bt < p[idx].bt) {
+                    idx = i;
+                } else if (p[i].bt == p[idx].bt) {
+                    if (p[i].at < p[idx].at ||
+                       (p[i].at == p[idx].at && strcmp(p[i].pid, p[idx].pid) < 0)) {
+                        idx = i;
+                    }
+                }
+            }
+        }
+
+        if (idx == -1) { /* No process arrived yet: advance to earliest arrival */
+            int next_at = 1000000000;
+            for (int i = 0; i < n; i++)
+                if (!p[i].completed && p[i].at < next_at) next_at = p[i].at;
+
+            printf("  [CPU IDLE]  Start: %2d | End: %2d  (No process available)\n", cur_time, next_at);
+            strcat(seq_buf, "IDLE -> ");
+            cur_time = next_at;
+            continue;
+        }
+
+        p[idx].st  = cur_time;
+        p[idx].ct  = p[idx].st + p[idx].bt;
+        p[idx].tat = p[idx].ct - p[idx].at;
+        p[idx].wt  = p[idx].tat - p[idx].bt;
+        p[idx].completed = 1;
+        cur_time = p[idx].ct;
+        completed++;
+
+        printf("  [PROCESS ]  %-4s      | Start: %2d | End: %2d  (AT: %2d, BT: %2d)\n",
+               p[idx].pid, p[idx].st, p[idx].ct, p[idx].at, p[idx].bt);
+        strcat(seq_buf, p[idx].pid);
+        if (completed < n) strcat(seq_buf, " -> ");
+    }
+    printf("\nSJF Execution Sequence  : %s\n", seq_buf);
+    print_metrics_table(p, n, "Non-Preemptive SJF");
+}
+
+int main(void) {
+    int n;
+    Process orig[MAX_PROC];
+
+    printf("Enter number of processes (1 - %d): ", MAX_PROC);
+    while (scanf("%d", &n) != 1 || n <= 0 || n > MAX_PROC) {
+        printf("[INVALID] Number of processes must be between 1 and %d. Re-enter: ", MAX_PROC);
+        while (getchar() != '\n');
+    }
+
+    for (int i = 0; i < n; i++) {
+        int valid = 0;
+        while (!valid) {
+            printf("Enter Process %d [PID Arrival_Time Burst_Time]: ", i + 1);
+            if (scanf("%15s %d %d", orig[i].pid, &orig[i].at, &orig[i].bt) != 3) {
+                printf("  [ERROR] Malformed input format. Try again.\n");
+                while (getchar() != '\n');
+                continue;
+            }
+            if (orig[i].at < 0 || orig[i].bt <= 0) {
+                printf("  [ERROR] Validation failed: require AT >= 0 and BT > 0.\n");
+                continue;
+            }
+            valid = 1;
+            for (int k = 0; k < i; k++) {
+                if (strcmp(orig[k].pid, orig[i].pid) == 0) {
+                    printf("  [ERROR] Duplicate Process ID '%s'. Must be unique.\n", orig[i].pid);
+                    valid = 0;
+                }
+            }
+        }
+        orig[i].input_idx = i;
+    }
+
+    display_original_data(orig, n);
+    run_fcfs(orig, n);
+    run_sjf(orig, n);
+    return 0;
+}
