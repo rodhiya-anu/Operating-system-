@@ -1,0 +1,67 @@
+import threading
+import multiprocessing
+import time
+from collections import deque
+
+# --- PART 1: ROUND ROBIN SCHEDULER WITH IDLE DETECTION ---
+def simulate_round_robin(processes, quantum=2):
+    # processes: list of dicts with 'pid', 'at', 'bt'
+    ready_q = deque()
+    unstarted = sorted(processes, key=lambda p: (p['at'], p['pid']))
+    curr_time = 0
+    rem_bt = {p['pid']: p['bt'] for p in processes}
+    first_resp = {}
+    completed = {}
+    gantt = []
+
+    while len(completed) < len(processes):
+        while unstarted and unstarted[0]['at'] <= curr_time:
+            ready_q.append(unstarted.pop(0)['pid'])
+        
+        if not ready_q:
+            if unstarted:
+                next_arr = unstarted[0]['at']
+                gantt.append(('IDLE', curr_time, next_arr))
+                curr_time = next_arr
+                continue
+            else:
+                break
+
+        pid = ready_q.popleft()
+        if pid not in first_resp:
+            first_resp[pid] = curr_time
+
+        exec_time = min(quantum, rem_bt[pid])
+        start_t = curr_time
+        curr_time += exec_time
+        rem_bt[pid] -= exec_time
+        gantt.append((pid, start_t, curr_time))
+
+        while unstarted and unstarted[0]['at'] <= curr_time:
+            ready_q.append(unstarted.pop(0)['pid'])
+
+        if rem_bt[pid] > 0:
+            ready_q.append(pid)
+        else:
+            completed[pid] = curr_time
+
+    return completed, first_resp, gantt
+
+# --- PART 2: MULTI-THREADING (Python threading) ---
+def thread_worker(task_id, items_to_process):
+    tid = threading.get_native_id()
+    tname = threading.current_thread().name
+    print(f"  [+] Thread '{tname}' (OS-TID: {tid}) started batch {task_id}.")
+    acc = sum(x * x for x in items_to_process)
+    time.sleep(0.04)  # Simulate non-blocking computational workload
+    print(f"  [✓] Thread '{tname}' (OS-TID: {tid}) finished. Work Sum = {acc}")
+
+# --- PART 3: INTER-PROCESS COMMUNICATION (multiprocessing.Queue) ---
+def ipc_sender(queue):
+    msg = {"sender": "WorkerProcess-1", "code": 200, "data": "SYSTEM_CORE_HEALTH_OK"}
+    print(f"  [IPC-Sender (PID {multiprocessing.current_process().pid})]: Transmitting -> {msg}")
+    queue.put(msg)
+
+def ipc_receiver(queue):
+    msg = queue.get()
+    print(f"  [IPC-Receiver (PID {multiprocessing.current_process().pid})]: Received <- {msg}")
